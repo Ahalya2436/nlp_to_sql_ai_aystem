@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AskDB</title>
+
+    <style>
+        body{    
+            font-family: Arial;
+            background:#f4f6f8;
+            text-align:center;
+            margin-top:80px;
+        }
+
+        h1{
+            font-size:40px;
+            margin-bottom:10px;
+        }
+
+        input{
+            width:350px;
+            padding:12px;
+            font-size:16px;
+            border-radius:8px;
+            border:1px solid #ccc;
+        }
+
+        button{
+            padding:12px 25px;
+            font-size:16px;
+            border:none;
+            border-radius:8px;
+            background:#28a745;
+            color:white;
+            margin-left:10px;
+            cursor:pointer;
+        }
+
+        button:hover{
+            background:#218838;
+        }
+
+        .box{
+            background:white;
+            width:70%;
+            margin:40px auto;
+            padding:20px;
+            border-radius:12px;
+            box-shadow:0px 0px 10px rgba(0,0,0,0.1);
+            text-align:left;
+        }
+
+        h2{
+            color:#333;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>AskDB</h1>
+<p>Natural Language to SQL Query System</p>
+
+<input type="text" id="prompt" placeholder="Ask your database..." />
+<button onclick="sendPrompt()">Ask</button>
+<select id="schema">
+    <option value="askdb">Users DB</option>
+    <option value="sales_db">Sales DB</option>
+    <option value="ecommerce_db">Ecommerce DB</option>
+    <option value="hospital_db">Hospital DB</option>
+    <option value="employee_db">Employee DB</option>
+</select>
+
+
+<div class="box">
+    <h2>Generated SQL</h2>
+    <p id="sql"></p>
+</div>
+
+<div class="box">
+    <h2>Result</h2>
+    <pre id="result"></pre>
+</div>
+
+<script>
+// Run when page loads
+window.onload = function() {
+
+    // Check if user_id already stored
+    let storedUser = localStorage.getItem("user_id");
+
+    if (!storedUser) {
+        // If not stored, create one (temporary demo user)
+        localStorage.setItem("user_id", 1);
+        console.log("User ID created and stored:", 1);
+    } else {
+        console.log("User ID already stored:", storedUser);
+    }
+};
+
+// Send Prompt Function
+async function sendPrompt(){
+
+    const prompt = document.getElementById("prompt").value;
+    const schema = document.getElementById("schema").value;
+
+    // Get user_id from localStorage
+    const userId = localStorage.getItem("user_id");
+
+    const response = await fetch("/query/ask", {
+        method:"POST",
+        headers:{
+            "Content-Type":"application/json"
+        },
+        body: JSON.stringify({
+            prompt: prompt,
+            user_id: parseInt(userId),
+            schema_name: schema
+        })
+    });
+
+    const data = await response.json();
+
+    // Show SQL
+    document.getElementById("sql").innerText = data.sql_query || "No SQL Generated";
+
+    // Show Result
+    document.getElementById("result").innerText =
+        JSON.stringify(data.result, null, 2);
+}
+
+</script>
