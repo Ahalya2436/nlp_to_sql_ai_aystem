@@ -1,16 +1,44 @@
+version: "3.9"
 
 services:
-  qdrant:
-    image: qdrant/qdrant
-    ports:
-      - "6333:6333"
 
+  # -----------------------------
+  # MySQL Database
+  # -----------------------------
   mysql:
     image: mysql:8
+    container_name: mysql_db
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: root@1234
       MYSQL_DATABASE: ai_system_db
     ports:
       - "3307:3306"
 
-  
+  # -----------------------------
+  # Qdrant Vector DB
+  # -----------------------------
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant_db
+    ports:
+      - "6333:6333"
+
+  # -----------------------------
+  # FastAPI Application
+  # -----------------------------
+  api:
+    build: .
+    container_name: nl_sql_api
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: mysql              # connect to mysql container
+      DB_USER: root
+      DB_PASSWORD: root@1234
+      DB_NAME: ai_system_db
+      QDRANT_HOST: qdrant         # connect to qdrant container
+      QDRANT_PORT: 6333
+    depends_on:
+      - mysql
+      - qdrant

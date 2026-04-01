@@ -1,5 +1,6 @@
 import uuid
 import requests
+import os
 from sqlalchemy import text
 
 from qdrant_client import QdrantClient
@@ -11,45 +12,61 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue
 )
+
 from core.config import settings
 
+
+# =========================
+# CONFIG
+# =========================
 EMBEDDING_API = settings.EMBEDDING_API
 COLLECTION_NAME = settings.COLLECTION_NAME
 
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+
 client = QdrantClient(
-    host="localhost",
+    host=QDRANT_HOST,
     port=6333
 )
+
+
+# =========================
 # LOCAL CACHE
+# =========================
 TABLE_CACHE = {}
 RELATIONSHIP_CACHE = {}
 
-# CREATE COLLECTION
+
+# =========================
+# CREATE COLLECTION (SAFE)
+# =========================
 def create_collection():
+    try:
+        collections = client.get_collections().collections
+        names = [c.name for c in collections]
 
-    collections = client.get_collections().collections
-    names = [c.name for c in collections]
+        if COLLECTION_NAME not in names:
+            print("Creating Qdrant collection...")
 
-    if COLLECTION_NAME not in names:
-
-        client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(
-                size=768,
-                distance=Distance.COSINE
+            client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=VectorParams(
+                    size=768,  # ⚠️ must match embedding model
+                    distance=Distance.COSINE
+                )
             )
-        )
 
-        print("Vector collection created")
+        else:
+            print("Collection already exists")
 
-    else:
-        print("Vector collection already exists")
+    except Exception as e:
+        print("Collection error:", e)
 
-create_collection()
 
-# SAFE EMBEDDING API
+# =========================
+# EMBEDDING API
+# =========================
 def get_embedding(text_value: str):
-
     try:
         response = requests.post(
             EMBEDDING_API,
@@ -66,9 +83,11 @@ def get_embedding(text_value: str):
         print("Embedding error:", e)
         return []
 
-# FETCH SCHEMA CHUNKS
-def get_schema_chunks(db, database_name: str):
 
+# =========================
+# FETCH SCHEMA
+# =========================
+def get_schema_chunks(db, database_name: str):
     try:
         query = text("""
             SELECT table_name, column_name
@@ -91,20 +110,20 @@ def get_schema_chunks(db, database_name: str):
     docs = []
 
     for table, cols in tables.items():
-
         schema_doc = f"""
 Table: {table}
 Description: Stores information about {table}
 Columns: {", ".join(cols)}
 """
-
         docs.append(schema_doc.strip())
 
     return docs
 
-# CHECK IF EMBEDDINGS EXIST
-def schema_embeddings_exist(database_name):
 
+# =========================
+# CHECK EMBEDDINGS EXIST
+# =========================
+def schema_embeddings_exist(database_name):
     try:
         results = client.scroll(
             collection_name=COLLECTION_NAME,
@@ -118,14 +137,21 @@ def schema_embeddings_exist(database_name):
             ),
             limit=1
         )
+
         return len(results[0]) > 0
 
     except Exception as e:
         print("Qdrant check error:", e)
         return False
 
-# STORE SCHEMA EMBEDDINGS
+
+# =========================
+# STORE EMBEDDINGS (FIXED)
+# =========================
 def store_schema_embeddings(db, database_name: str):
+
+    # 🔥 ALWAYS ensure collection exists
+    create_collection()
 
     if schema_embeddings_exist(database_name):
         print("Embeddings already exist for:", database_name)
@@ -162,15 +188,17 @@ def store_schema_embeddings(db, database_name: str):
             collection_name=COLLECTION_NAME,
             points=points
         )
+
         print(f"{database_name} schema embedded successfully")
 
-# KEYWORD SEARCH (CACHED)
+
+# =========================
+# KEYWORD SEARCH
+# =========================
 def keyword_schema_search(db, database_name, question):
     try:
-
         if database_name in TABLE_CACHE:
             tables = TABLE_CACHE[database_name]
-
         else:
             query = text("""
                 SELECT table_name
@@ -184,7 +212,6 @@ def keyword_schema_search(db, database_name, question):
             TABLE_CACHE[database_name] = tables
 
         matched = []
-
         question = question.lower()
 
         for table in tables:
@@ -197,13 +224,14 @@ def keyword_schema_search(db, database_name, question):
         print("Keyword search error:", e)
         return []
 
-# RELATIONSHIP EXPANSION 
+
+# =========================
+# RELATIONSHIP EXPANSION
+# =========================
 def expand_with_relationships(db, database_name, schema_chunks):
     try:
-
         if database_name in RELATIONSHIP_CACHE:
             rows = RELATIONSHIP_CACHE[database_name]
-
         else:
             fk_query = text("""
                 SELECT table_name, referenced_table_name
@@ -216,7 +244,6 @@ def expand_with_relationships(db, database_name, schema_chunks):
             RELATIONSHIP_CACHE[database_name] = rows
 
         related = set()
-
         chunk_text = " ".join(schema_chunks)
 
         for table, ref_table in rows:
@@ -229,9 +256,11 @@ def expand_with_relationships(db, database_name, schema_chunks):
     except Exception as e:
         print("Relationship expansion error:", e)
         return set()
-    
 
-#  RAG SEARCH
+
+# =========================
+# RAG SEARCH
+# =========================
 def search_schema(question: str, database_name: str, db=None, top_k: int = 2):
 
     query_embedding = get_embedding(question)
@@ -282,5 +311,4 @@ def search_schema(question: str, database_name: str, db=None, top_k: int = 2):
         for table in related_tables:
             docs.append(f"Related Table: {table}")
 
-    # LIMIT OUTPUT 
     return "\n".join(list(set(docs))[:5])

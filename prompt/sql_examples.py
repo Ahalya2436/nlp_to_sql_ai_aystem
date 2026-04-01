@@ -119,6 +119,7 @@ JOIN orders o ON c.id = o.customer_id
 JOIN payments p ON o.id = p.order_id
 GROUP BY c.name
 HAVING COUNT(p.id) > 1;
+
 """
 },
 

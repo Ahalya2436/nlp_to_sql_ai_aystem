@@ -16,66 +16,46 @@ from services.schema_vector_services import search_schema, get_embedding
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
-
-# ==============================
-# 🔥 1. FULL DASHBOARD (MAIN API)
-# ==============================
+# 1. FULL DASHBOARD 
 @router.get("/summary")
 def dashboard_summary(db: Session = Depends(get_db)):
     return get_dashboard_summary(db)
 
 
-# ==============================
-# 📊 2. MAIN METRICS
-# ==============================
+# 2. MAIN METRICS
 @router.get("/metrics")
 def metrics(db: Session = Depends(get_db)):
     return get_model_metrics(db)
 
 
-# ==============================
-# 📈 3. ACCURACY TREND
-# ==============================
+# 3. ACCURACY TREND
 @router.get("/accuracy-per-day")
 def accuracy_day(db: Session = Depends(get_db)):
     return accuracy_per_day(db)
 
 
-# ==============================
-# ❌ 4. FAILING PROMPTS
-# ==============================
+# 4. FAILING PROMPTS
 @router.get("/failing-prompts")
 def failing(db: Session = Depends(get_db)):
     return failing_prompts(db)
 
 
-# ==============================
-# 🔁 5. RETRY ANALYSIS (UPDATED)
-# ==============================
+# 5. RETRY ANALYSIS 
 @router.get("/retry-analysis")
 def retry(db: Session = Depends(get_db)):
     return retry_analysis(db)
 
-
-# ==============================
-# 🐞 6. ERROR ANALYSIS (NEW 🔥)
-# ==============================
+# 6. ERROR ANALYSIS 
 @router.get("/error-analysis")
 def errors(db: Session = Depends(get_db)):
     return error_analysis(db)
 
-
-# ==============================
-# ⚡ 7. SLOW QUERIES
-# ==============================
+# 7. SLOW QUERIES
 @router.get("/slow-queries")
 def slow(db: Session = Depends(get_db)):
     return slow_queries(db)
 
-
-# ==============================
-# 🧠 8. RAG DEBUG (KEEP)
-# ==============================
+# 8. RAG DEBUG 
 @router.get("/rag/debug")
 def rag_debug(question: str, database_name: str):
 
