@@ -29,7 +29,37 @@ client = QdrantClient(
     port=6333
 )
 
+def extract_keywords(question: str):
 
+    STOPWORDS = {
+        "show", "get", "find", "list", "give",
+        "all", "the", "of", "data", "details",
+        "which", "what", "did", "is"
+    }
+
+    words = question.lower().split()
+
+    return [
+        w for w in words
+        if w not in STOPWORDS and len(w) > 2
+    ]
+
+
+def filter_columns_dynamic(cols, question):
+
+    keywords = extract_keywords(question)
+
+    matched = []
+
+    for col in cols:
+        if any(k in col.lower() for k in keywords):
+            matched.append(col)
+
+    # fallback
+    if not matched:
+        return cols[:5]
+
+    return matched[:8]
 # =========================
 # LOCAL CACHE
 # =========================
@@ -51,7 +81,7 @@ def create_collection():
             client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(
-                    size=768,  # ⚠️ must match embedding model
+                    size=768,  #  must match embedding model
                     distance=Distance.COSINE
                 )
             )
@@ -87,7 +117,10 @@ def get_embedding(text_value: str):
 # =========================
 # FETCH SCHEMA
 # =========================
-def get_schema_chunks(db, database_name: str):
+# =========================
+# FETCH SCHEMA (UPDATED 🔥)
+# =========================
+def get_schema_chunks(db, database_name: str, question: str):
     try:
         query = text("""
             SELECT table_name, column_name
@@ -110,19 +143,22 @@ def get_schema_chunks(db, database_name: str):
     docs = []
 
     for table, cols in tables.items():
+
+        # 🔥 DYNAMIC COLUMN FILTER
+        filtered_cols = filter_columns_dynamic(cols, question)
+
         schema_doc = f"""
 Table: {table}
 Description: Stores information about {table}
-Columns: {", ".join(cols)}
+Relevant Columns: {", ".join(filtered_cols)}
 """
+
         docs.append(schema_doc.strip())
 
     return docs
 
 
-# =========================
 # CHECK EMBEDDINGS EXIST
-# =========================
 def schema_embeddings_exist(database_name):
     try:
         results = client.scroll(
@@ -145,19 +181,17 @@ def schema_embeddings_exist(database_name):
         return False
 
 
-# =========================
 # STORE EMBEDDINGS (FIXED)
-# =========================
 def store_schema_embeddings(db, database_name: str):
 
-    # 🔥 ALWAYS ensure collection exists
+    #  ALWAYS ensure collection exists
     create_collection()
 
     if schema_embeddings_exist(database_name):
         print("Embeddings already exist for:", database_name)
         return
 
-    documents = get_schema_chunks(db, database_name)
+    documents = get_schema_chunks(db, database_name,question="")
 
     if not documents:
         print("No schema found")
@@ -263,10 +297,13 @@ def expand_with_relationships(db, database_name, schema_chunks):
 # =========================
 def search_schema(question: str, database_name: str, db=None, top_k: int = 2):
 
+    # Get embedding
     query_embedding = get_embedding(question)
-
     if not query_embedding:
         return ""
+
+    # Vector search (ONLY for table names, not full schema)
+    vector_tables = set()
 
     try:
         results = client.query_points(
@@ -283,32 +320,67 @@ def search_schema(question: str, database_name: str, db=None, top_k: int = 2):
             )
         )
 
+        if results and results.points:
+            for point in results.points:
+                text = point.payload.get("text", "")
+
+                # Extract table name safely
+                if "Table:" in text:
+                    table_name = text.split("Table:")[1].split("\n")[0].strip()
+                    vector_tables.add(table_name)
+
     except Exception as e:
         print("Vector search error:", e)
-        return ""
 
-    docs = []
-
-    if results and results.points:
-        for point in results.points:
-            docs.append(point.payload["text"])
-
-    # KEYWORD SEARCH
+    # Keyword search (adds more tables)
+    keyword_tables = set()
     if db:
-        keyword_tables = keyword_schema_search(db, database_name, question)
+        keyword_tables = set(
+            keyword_schema_search(db, database_name, question)
+        )
 
-        for table in keyword_tables:
-            docs.append(f"Table: {table}")
+    # Merge table candidates
+    selected_tables = vector_tables.union(keyword_tables)
 
-    # RELATIONSHIP EXPANSION
-    if db and docs:
+    # fallback if nothing found
+    if not selected_tables and db:
+        dynamic_chunks = get_schema_chunks(db, database_name, question)
+        return "\n\n".join(dynamic_chunks[:3])
+
+    # Get CLEAN filtered schema ONLY for selected tables
+    final_docs = []
+
+    if db:
+        dynamic_chunks = get_schema_chunks(db, database_name, question)
+
+        for chunk in dynamic_chunks:
+            if "Table:" in chunk:
+                table_name = chunk.split("Table:")[1].split("\n")[0].strip()
+
+                if table_name in selected_tables:
+                    final_docs.append(chunk)
+
+    # Relationship expansion (ONLY add table names, not schema)
+    if db and final_docs:
         related_tables = expand_with_relationships(
             db,
             database_name,
-            docs
+            final_docs
         )
 
         for table in related_tables:
-            docs.append(f"Related Table: {table}")
+            if table not in selected_tables:
+                final_docs.append(f"Related Table: {table}")
 
-    return "\n".join(list(set(docs))[:5])
+    # Remove duplicates + limit size
+    seen = set()
+    clean_docs = []
+
+    for doc in final_docs:
+        if doc not in seen:
+            clean_docs.append(doc)
+            seen.add(doc)
+
+    return "\n\n".join(clean_docs[:5])
+    
+       

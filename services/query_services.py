@@ -143,6 +143,7 @@ def handle_prompt(prompt: str, user_id: int, schema: str, db):
     retry_success = False
     hallucination = False
     error_message = None
+    status = "success"
 
     cache_key = f"{schema}:{prompt}"
 
@@ -268,6 +269,8 @@ Return only SQL.
             success = False
             hallucination = True
             error_message = str(final_error)
+            status = "fail"
+
 
     # METRICS
     execution_time = round((time.time() - start_time) * 1000, 2)
@@ -294,20 +297,31 @@ Return only SQL.
         hallucination=hallucination,
         confidence_score=1.0,
         first_attempt_success=first_attempt_success
+
     )
 
     if user_id:
         store_history(db, sql_query)
+        # Decide status code
+    if success:
+        status_code = 200
+        status = "success"
+    else:
+        status_code = 500
+        status = "fail"
+
 
     # FINAL RESPONSE
     response = {
-        "status": "success",
+        "status_code":status_code,
+        "status": status,
         "schema": schema,
         "model_used": "vllm_llama3_gpu",
         "sql_query": sql_query,
         "result": result,
         "retrieved_schema": base_schema,
-        "filtered_schema": filtered_schema,  
+        "filtered_schema": filtered_schema,
+        "data":result,  
         "evaluation": {
             "success": success,
             "retry_count": retry_count,

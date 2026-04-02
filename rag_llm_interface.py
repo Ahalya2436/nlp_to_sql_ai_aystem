@@ -29,9 +29,7 @@ prompt = st.text_input("Enter your natural language query")
 
 run_query = st.button("Run Query")
 
-# =========================
 # RUN QUERY
-# =========================
 if run_query:
 
     if not prompt or not prompt.strip():
@@ -49,22 +47,38 @@ if run_query:
             response = requests.post(API_URL, json=payload, timeout=120)
 
     except requests.exceptions.RequestException as e:
-        st.error("Failed to connect to API")
+        st.error(" Failed to connect to API")
         st.text(str(e))
         st.stop()
 
-    # =========================
-    # RESPONSE VALIDATION
-    # =========================
-    if response.status_code != 200:
-        st.error(f"API Error: {response.status_code}")
-        st.text(response.text)
+    status_code = response.status_code
+
+    # STATUS DISPLAY 
+    st.subheader("API Status")
+
+    if status_code == 200:
+        st.success(f" Success (200)")
+    elif status_code == 400:
+        st.warning(f" Bad Request (400)")
+    elif status_code == 404:
+        st.warning(f" Not Found (404)")
+    elif status_code == 422:
+        st.warning(f" Query Execution Failed (422)")
+    elif status_code == 500:
+        st.error(f" Server Error (500)")
+    else:
+        st.info(f"ℹ Status Code: {status_code}")
+
+    # HANDLE NON-200 RESPONSE
+    if status_code != 200:
+        try:
+            error_data = response.json()
+            st.error(error_data.get("detail", "Unknown error"))
+        except:
+            st.error(response.text)
         st.stop()
 
-    if not response.text or not response.text.strip():
-        st.error("API returned empty response")
-        st.stop()
-
+    # VALID JSON
     try:
         data = response.json()
     except Exception:
@@ -72,8 +86,9 @@ if run_query:
         st.text(response.text)
         st.stop()
 
-    # DEBUG (optional)
-    # st.write("DEBUG:", data)
+    # SHOW BACKEND STATUS (if present)
+    backend_status = data.get("status", "unknown")
+    st.markdown(f"**Backend Status:** `{backend_status}`")
 
     col1, col2 = st.columns(2)
 
@@ -85,7 +100,7 @@ if run_query:
         st.markdown("### Model Used")
         st.write(data.get("model_used", "vllm"))
 
-        # SQL OUTPUT SAFE
+        # SQL OUTPUT
         st.markdown("### Generated SQL")
         sql_query = data.get("sql_query")
 
@@ -96,7 +111,6 @@ if run_query:
 
         # EVALUATION
         st.markdown("### Evaluation Metrics")
-
         evaluation = data.get("evaluation", {})
 
         if evaluation:
@@ -104,10 +118,10 @@ if run_query:
         else:
             st.info("No evaluation data available")
 
+        # Confidence
         confidence = evaluation.get("confidence_score", 1)
         hallucination = evaluation.get("hallucination", False)
 
-        # Confidence UI
         if confidence >= 0.8:
             st.success(f"Confidence Score: {confidence}")
         elif confidence >= 0.5:
@@ -116,23 +130,12 @@ if run_query:
             st.error(f"Confidence Score: {confidence}")
 
         if hallucination:
-            st.error("Hallucination detected in generated SQL")
+            st.error(" Hallucination detected in generated SQL")
 
-    # =========================
     # RIGHT: RAG CONTEXT
-    # =========================
     with col2:
 
-        #st.subheader("Schema Retrieval (RAG)")
-
-        #retrieved_schema = data.get("retrieved_schema")
-        # SAFE DISPLAY
-        #if retrieved_schema is not None and str(retrieved_schema).strip():
-        #    st.code(str(retrieved_schema))
-        #else:
-        #    st.info("No schema context retrieved")
-
-        st.subheader("Schema Retrival(RAG)")
+        st.subheader("Schema Retrieval (RAG)")
 
         filtered_schema = data.get("filtered_schema")
 
@@ -143,26 +146,23 @@ if run_query:
 
     st.divider()
 
-    # =========================
     # RESULT TABLE
-    # =========================
     st.subheader("Query Result")
 
-    result = data.get("result")
+    result = data.get("data") or data.get("result")
 
     if result and isinstance(result, list) and len(result) > 0:
 
         try:
             df = pd.DataFrame(result)
+            st.dataframe(df, use_container_width=True)
 
-            st.dataframe(df, width="stretch")
-
-            # Numeric checks
+            # Check negative values
             numeric_cols = df.select_dtypes(include=["float", "int"]).columns
 
             for col in numeric_cols:
                 if (df[col] < 0).any():
-                    st.warning(f"⚠ Negative values detected in column: {col}")
+                    st.warning(f" Negative values detected in column: {col}")
 
         except Exception as e:
             st.error("Error displaying results")
@@ -171,9 +171,7 @@ if run_query:
     else:
         st.info("No rows returned")
 
-# =========================
 # SIDEBAR
-# =========================
 st.sidebar.title("About")
 
 st.sidebar.info(
@@ -186,6 +184,7 @@ Features:
 • SQL hallucination detection  
 • Confidence scoring  
 • Query result visualization  
+• API status monitoring  
 """
 )
 
